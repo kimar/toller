@@ -1,5 +1,5 @@
 {
-  "name": "Toller",
+  "name": "toller",
   "version": "0.9.0",
   "description": "A module to retrieve information from RTA's E-Toll Website",
   "main": "index.js",

@@ -8,6 +8,14 @@ Please be also aware that this module may break as soon as the website parse cha
 
 ### Usage
 
+Install `Toller` using `npm`:
+
+```
+npm install -S toller
+```
+
+then use it inside your app like any other node module:
+
 ```
 var Toller = require('toller');
 var toller = Toller('username', 'password');
