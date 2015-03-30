@@ -27,8 +27,11 @@ var Toller = module.exports = function Toller (username, password) {
  * @param  {String} location Location header value
  * @return {Boolean}         true or false
  */
-var authenticationNeeded = function (location) {
+var authenticationNeeded = function (location, body) {
   if (/Action=externalETollHomepage/.test(location)) {
+    return true;
+  }
+  if (typeof body !== 'undefined' && /RTA redirect/.test(body)) {
     return true;
   }
   return false;
@@ -68,6 +71,44 @@ var dateStringToTimestamp = function (dateString) {
 }
 
 /**
+ * Instantiates a GET request with form data to given path
+ * 
+ * @param  {String} path A string pointing to the path
+ * @param  {Function} Callback function
+ * @return {Promise} Returns a bluebird promise
+ */
+Toller.prototype.getRequest = function (path, cb) {
+  return new Promise(function (resolve, reject) {
+    var params = {
+      headers: this.headers,
+      jar: this.cookie
+    };
+    request.getAsync(this.baseurl + path, params)
+    .then(function (httpResponse) {
+      var location = httpResponse[0].headers.location;
+      var body = httpResponse[0].body;
+      if (authenticationNeeded(location, body)) {
+        this.authenticate()
+        .then(function (location) {
+          return this.getRequest(path, cb);
+        }.bind(this))
+        .then(function (body) {
+          resolve(body);
+        })
+        .error(function (err) {
+          reject(err);
+        });
+        return;
+      }
+      resolve(body);
+    }.bind(this))
+    .error(function (err) {
+      reject(err);
+    });
+  }.bind(this)).nodeify(cb);
+};
+
+/**
  * Instantiates a POST request with form data to given path
  * 
  * @param  {Object} form A form-data object
@@ -105,35 +146,53 @@ Toller.prototype.postRequest = function (form, path, cb) {
       reject(err);
     });
   }.bind(this)).nodeify(cb);
-}
+};
+
+/**
+ * Instantiates a request used for account details
+ * 
+ * @param  {Function} Callback
+ * @return {Promise} A bluebird promise
+ */
+Toller.prototype.accountDetailsRequest = function (cb) {
+  return this.getRequest('/viewAccountDetails.do?action=viewAccountDetails', cb);
+};
+
+/**
+ * Instantiates a request used for customer details
+ * 
+ * @param  {Function} Callback
+ * @return {Promise} A bluebird promise
+ */
+Toller.prototype.customerDetailsRequest = function (cb) {
+  return this.getRequest('/manageCustomer.do?action=doDisplayCustomerDetailsReadOnly', cb);
+};
 
 /**
  * Instantiates a request used for statements
  * 
- * @param  {String} path A string to the path
  * @param  {Function} Callback
  * @return {Promise} A bluebird promise
  */
-Toller.prototype.tagUsageRequest = function (path, cb) {
+Toller.prototype.tagUsageRequest = function (cb) {
   return this.postRequest({
     action: 'tagUsage',
     format: 'none'
-  }, path, cb);
+  }, '/statements.do', cb);
 };
 
 /**
  * Instantiates a request used for all tags
  * 
- * @param  {String} path A string to the path
  * @param  {Function} Callback
  * @return {Promise} A bluebird promise
  */
-Toller.prototype.listAllTagsRequest = function (path, cb) {
+Toller.prototype.listAllTagsRequest = function (cb) {
   return this.postRequest({
     action: 'searchTagDetails',
     tagServiceId: '',
     listAllTagsSelected: 'on'
-  }, path, cb);
+  }, '/manageTagDetails.do', cb);
 };
 
 /**
@@ -173,6 +232,152 @@ Toller.prototype.authenticate = function (cb) {
 };
 
 /**
+ * Get RTA account details
+ * 
+ * @param  {Function} Callback
+ * @return {[Promise]} A bluebird promise
+ */
+Toller.prototype.getAccountDetails = function (cb) {
+  return new Promise(function (resolve, reject) {
+    this.accountDetailsRequest()
+    .then(function (body) {
+      var $ = cheerio.load(body);
+      var table = $('.borderTable');
+      var data = {};
+      var index = 0;
+      table.children('tr').each(function () {
+        var value = $(this).children('td').eq(1);
+        if (!value) {
+           return;
+         }
+        var sanitizedValue = value.text().trim();
+        switch (index) {
+          case 0:
+            data["tagCount"] = parseInt(sanitizedValue);
+            break;
+          case 1:
+           data["accountType"] = sanitizedValue;
+           break;
+          case 2:
+            data["accountCredit"] = parseFloat(sanitizedValue.replace(/^(.(?!\d)|\D)+/, ''));
+            break;
+          case 3:
+            data["topupAmount"] = parseFloat(sanitizedValue.replace(/^(.(?!\d)|\D)+/, ''));
+            break;
+          case 4:
+            data["topupTrigger"] = parseFloat(sanitizedValue.replace(/^(.(?!\d)|\D)+/, ''));
+            break;
+        }
+        index++;
+      });
+      resolve(data);
+    })
+    .error(function (err) {
+      reject(err);
+    });
+  }.bind(this)).nodeify(cb);
+};
+
+/**
+ * Get RTA customer details
+ * 
+ * @param  {Function} Callback
+ * @return {[Promise]} A bluebird promise
+ */
+Toller.prototype.getCustomerDetails = function (cb) {
+  return new Promise(function (resolve, reject) {
+    this.customerDetailsRequest()
+    .then(function (body) {
+      var $ = cheerio.load(body);
+      var data = {};
+      var index = 0;
+      var table = $('.label').parents('table').first();
+      // console.log(table.html());
+      table.children('tr').each(function () {
+        var value = $(this).children('td').eq(1);
+        if (!value) {
+          return;
+        }
+        var sanitizedValue = value.text().trim();
+        switch (index) {
+          case 1:
+            data["title"] = sanitizedValue;
+            break;
+          case 2:
+            data["firstNames"] = sanitizedValue;
+            break;
+          case 3:
+            data["lastName"] = sanitizedValue;
+            break;
+          case 4:
+            data["driverLicenseNumber"] = sanitizedValue;
+            break;
+          case 7:
+            if (!data["mailingAddress"]) {
+              data["mailingAddress"] = {};
+            }
+            data["mailingAddress"]["street"] = sanitizedValue;
+            break;
+          case 8:
+            if (!data["mailingAddress"]) {
+              data["mailingAddress"] = {};
+            }
+            data["mailingAddress"]["suburb"] = sanitizedValue;
+            break;
+          case 9:
+            if (!data["mailingAddress"]) {
+              data["mailingAddress"] = {};
+            }
+            data["mailingAddress"]["state"] = sanitizedValue;
+            break;
+          case 10:
+            if (!data["mailingAddress"]) {
+              data["mailingAddress"] = {};
+            }
+            data["mailingAddress"]["postcode"] = sanitizedValue;
+            break;
+          case 13:
+            if (!data["tagDeliveryAddress"]) {
+              data["tagDeliveryAddress"] = {};
+            }
+            data["tagDeliveryAddress"]["street1"] = sanitizedValue;
+            break;
+          case 14:
+            if (!data["tagDeliveryAddress"]) {
+              data["tagDeliveryAddress"] = {};
+            }
+            data["tagDeliveryAddress"]["street2"] = sanitizedValue;
+            break;
+          case 15:
+            if (!data["tagDeliveryAddress"]) {
+              data["tagDeliveryAddress"] = {};
+            }
+            data["tagDeliveryAddress"]["suburb"] = sanitizedValue;
+            break;
+          case 16:
+            if (!data["tagDeliveryAddress"]) {
+              data["tagDeliveryAddress"] = {};
+            }
+            data["tagDeliveryAddress"]["state"] = sanitizedValue;
+            break;
+          case 17:
+            if (!data["tagDeliveryAddress"]) {
+              data["tagDeliveryAddress"] = {};
+            }
+            data["tagDeliveryAddress"]["postcode"] = sanitizedValue;
+            break;
+        }
+        index++;
+      });
+      resolve(data);
+    })
+    .error(function (err) {
+      reject(err);
+    });
+  }.bind(this)).nodeify(cb);
+};
+
+/**
  * Gets all statements
  * 
  * @param  {Function} Callback
@@ -180,7 +385,7 @@ Toller.prototype.authenticate = function (cb) {
  */
 Toller.prototype.getAllStatements = function (cb) {
   return new Promise(function (resolve, reject) {
-    this.tagUsageRequest('/statements.do')
+    this.tagUsageRequest()
     .then(function (body) {
       var $ = cheerio.load(body);
       var table = $('#headerDate').parents('table').first();
@@ -214,7 +419,7 @@ Toller.prototype.getAllStatements = function (cb) {
  */
 Toller.prototype.getAllTags = function (cb) {
   return new Promise(function (resolve, reject) {
-    this.listAllTagsRequest('/manageTagDetails.do')
+    this.listAllTagsRequest()
     .then(function (body) {
       var $ = cheerio.load(body);
       var table = $('#headerTagId').parents('table').first();

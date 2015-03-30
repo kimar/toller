@@ -19,9 +19,25 @@ then use it inside your app like any other node module:
 ```
 var Toller = require('toller');
 var toller = Toller('username', 'password');
-toller.getAllStatements()
-.then(function(statements) {
-	console.log('Statements:\n', statements);
+
+toller.getCustomerDetails()
+.then(function (details) {
+  console.log('Customer Details:\n', details);
+  return toller.getAllTags();
+})
+.then(function (tags) {
+  console.log('Tags:\n', tags);
+  return toller.getAccountDetails();
+})
+.then(function (details) {
+  console.log('Account Details:\n', details);
+  return toller.getAllStatements();
+})
+.then(function (statements) {
+    console.log('Statements:\n', statements);
+})
+.error(function (err) {
+  console.log('Error:\n', err);
 });
 ```
 
