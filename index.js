@@ -71,6 +71,23 @@ var dateStringToTimestamp = function (dateString) {
 }
 
 /**
+ * Parsers all available Tag IDs from pages
+ * @param {Object} A Cheerio Object
+ * @return {Array} An array of Tag IDs
+ */
+var findAllTagsForStatements = function findAllTagsForStatements ($) {
+  var tags = [];
+  var table = $('#header1').parents('table').first();
+  table.children('tr').each(function () {
+    var tagId = $(this).find('.bodyText a').text().trim();
+    if (tagId.length > 0) {
+      tags.push(tagId)
+    }
+  });
+  return tags;
+}
+
+/**
  * Instantiates a GET request with form data to given path
  * 
  * @param  {String} path A string pointing to the path
@@ -179,6 +196,17 @@ Toller.prototype.tagUsageRequest = function (cb) {
     action: 'tagUsage',
     format: 'none'
   }, '/statements.do', cb);
+};
+
+/**
+ * Instantiates a request used for statements
+ *
+ * @param  {String} A Tag ID
+ * @param  {Function} Callback
+ * @return {Promise} A bluebird promise
+ */
+Toller.prototype.tagUsageRequestByTagId = function (tagId, cb) {
+  return this.getRequest('/statements.do?action=tagUsage&tagUsageIds=' + tagId, cb);
 };
 
 /**
@@ -389,22 +417,43 @@ Toller.prototype.getAllStatements = function (cb) {
     .then(function (body) {
       var $ = cheerio.load(body);
       var table = $('#headerDate').parents('table').first();
+      if (table.text().length > 0) {
+        return new Promise(function (resolve, reject) {
+          resolve([table]);
+        });
+      }
+      var tagIds = findAllTagsForStatements($);
+      var usageRequests = [];
+      tagIds.forEach(function (id) {
+        usageRequests.push(this.tagUsageRequestByTagId(id));
+      }.bind(this));
+      return new Promise(function (resolve, reject) {
+        Promise.all(usageRequests).then(function (pages) {
+          resolve(pages);
+        });
+      });
+    }.bind(this))
+    .then(function (pages) {
       var data = [];
-      table.children('tr').each(function () {
-          var buffer = [];
-          $(this).find('td').each(function () {
-            buffer.push($(this).text().trim());
-          });
-          data.push({
-            time: new Date(parseableDateString(buffer[0])),
-            place: buffer[1],
-            lane: buffer[2],
-            toll: parseFloat(buffer[3]),
-          });
+      pages.forEach(function (page) {
+        var $ = cheerio.load(page);
+        var table = $('#headerDate').parents('table').first();
+        table.children('tr').each(function () {
+            var buffer = [];
+            $(this).find('td').each(function () {
+              buffer.push($(this).text().trim());
+            });
+            data.push({
+              time: new Date(parseableDateString(buffer[0])),
+              place: buffer[1],
+              lane: buffer[2],
+              toll: parseFloat(buffer[3]),
+            });
+        });
       });
       data = data.slice(1, data.length - 1);
       resolve(data);
-    })
+    }.bind(this))
     .error(function (err) {
       reject(err);
     });
