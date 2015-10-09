@@ -88,6 +88,17 @@ var findAllTagsForStatements = function findAllTagsForStatements ($) {
 }
 
 /**
+ * Checks if date object is valid date
+ * @param {Object} A date object
+ * @return {Boolean} true or false
+ */
+function isValidDate(d) {
+  if ( Object.prototype.toString.call(d) !== "[object Date]" )
+    return false;
+  return !isNaN(d.getTime());
+}
+
+/**
  * Instantiates a GET request with form data to given path
  * 
  * @param  {String} path A string pointing to the path
@@ -320,7 +331,6 @@ Toller.prototype.getCustomerDetails = function (cb) {
       var data = {};
       var index = 0;
       var table = $('.label').parents('table').first();
-      // console.log(table.html());
       table.children('tr').each(function () {
         var value = $(this).children('td').eq(1);
         if (!value) {
@@ -439,16 +449,20 @@ Toller.prototype.getAllStatements = function (cb) {
         var $ = cheerio.load(page);
         var table = $('#headerDate').parents('table').first();
         table.children('tr').each(function () {
-            var buffer = [];
-            $(this).find('td').each(function () {
-              buffer.push($(this).text().trim());
-            });
-            data.push({
-              time: new Date(parseableDateString(buffer[0])),
-              place: buffer[1],
-              lane: buffer[2],
-              toll: parseFloat(buffer[3]),
-            });
+          var buffer = [];
+          $(this).find('td').each(function () {
+            buffer.push($(this).text().trim());
+          });
+          var newDate = new Date(parseableDateString(buffer[0]));
+          if (!isValidDate(newDate)) {
+            return;
+          }
+          data.push({
+            time: newDate,
+            place: buffer[1],
+            lane: buffer[2],
+            toll: parseFloat(buffer[3]),
+          });
         });
       });
       data = data.slice(1, data.length - 1);
