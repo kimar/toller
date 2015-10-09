@@ -1,6 +1,6 @@
 {
   "name": "toller",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "A module to retrieve information from RTA's E-Toll Website",
   "main": "index.js",
   "scripts": {
